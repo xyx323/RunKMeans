@@ -4,7 +4,7 @@
  * See LICENSE file for further information.
  */
 
-package scala.com.cloudera.datascience.kmeans
+package scala.com.RunKMeans
 
 import org.apache.spark.mllib.clustering._
 import org.apache.spark.mllib.linalg._
