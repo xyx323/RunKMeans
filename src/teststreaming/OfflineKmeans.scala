@@ -1,34 +1,44 @@
-/*
- * Copyright 2015 Sanford Ryza, Uri Laserson, Sean Owen and Joshua Wills
- *
- * See LICENSE file for further information.
- */
-
-package scala.com.RunKMeans
-
-import org.apache.spark.mllib.clustering._
-import org.apache.spark.mllib.linalg._
-import org.apache.spark.rdd._
+import org.apache.spark.mllib.clustering.{KMeans, KMeansModel}
+import org.apache.spark.mllib.linalg.{Vector, Vectors}
+import org.apache.spark.rdd.RDD
 import org.apache.spark.{SparkConf, SparkContext}
-//import org.apache.spark.SparkContext._
+import org.apache.spark.streaming.{Seconds, StreamingContext}
 
-object RunKMeans {
+/**
+  * Created by xyx on 3/30/16.
+  */
 
+object OfflineKmeans{
   def main(args: Array[String]): Unit = {
     val sc = new SparkContext(new SparkConf().setAppName("K-means").setMaster("local"))
     val rawData = sc.textFile("file:///home/xyx/Desktop/kddcup.data_10_percent_corrected")
-    //visualizationInR(rawData)
-    clusteringTake0(rawData)
-    //    clusteringTake1(rawData)
-    //    clusteringTake2(rawData)
-    //    clusteringTake3(rawData)
+    //testSavedModel(rawData,sc)
+    //clusteringTake0(rawData,sc)
+    // clusteringTake1(rawData)
+     //   clusteringTake2(rawData)
+     //   clusteringTake3(rawData)
     //    clusteringTake4(rawData)
-    //    anomalies(rawData)
+      //  anomalies(rawData,sc)
+    //teststandardscaler(rawData)
+    buildLatestModel(rawData,sc)
+
+  }
+  def testSavedModel(rawData: RDD[String],sc:SparkContext): Unit = {
+    val labelsAndData = rawData.map { line =>
+      val buffer = line.split(',').toBuffer
+      buffer.remove(1, 3)
+      val label = buffer.remove(buffer.length - 1)
+      val vector = Vectors.dense(buffer.map(_.toDouble).toArray)
+      (label, vector)
+    }
+    val offlinemodel = KMeansModel.load(sc, "/home/xyx/Desktop/model/")
+    offlinemodel.clusterCenters.foreach(println)
+    offlinemodel.predict(labelsAndData.map(lp=>lp._2)).take(30).foreach(println)
   }
 
   // Clustering, Take 0
 
-  def clusteringTake0(rawData: RDD[String]): Unit = {
+  def clusteringTake0(rawData: RDD[String],sc:SparkContext): Unit = {
 
     rawData.map(_.split(',').last).countByValue().toSeq.sortBy(_._2).reverse.foreach(println)
 
@@ -56,6 +66,7 @@ object RunKMeans {
       println(f"$cluster%1s$label%18s$count%8s")
     }
 
+    model.save(sc,"/home/xyx/Desktop/model/")
 
     data.unpersist()
   }
@@ -81,7 +92,7 @@ object RunKMeans {
   def clusteringScore2(data: RDD[Vector], k: Int): Double = {
     val kmeans = new KMeans()
     kmeans.setK(k)
-    kmeans.setRuns(10)
+    //kmeans.setRuns(10)
     kmeans.setEpsilon(1.0e-6)
     val model = kmeans.run(data)
     data.map(datum => distToCentroid(datum, model)).mean()
@@ -96,67 +107,37 @@ object RunKMeans {
       Vectors.dense(buffer.map(_.toDouble).toArray)
     }.cache()
 
-    (5 to 30 by 5).map(k => (k, clusteringScore(data, k))).
-      foreach(println)
+//    (5 to 30 by 5).map(k => (k, clusteringScore(data, k))).
+//      foreach(println)
 
-    (30 to 100 by 10).par.map(k => (k, clusteringScore2(data, k))).
+    (160 to 200 by 10)/*.par*/.map(k => (k, clusteringScore2(data, k))).
       toList.foreach(println)
+
 
     data.unpersist()
 
   }
 
-  def visualizationInR(rawData: RDD[String]): Unit = {
-
+  def teststandardscaler(rawData:RDD[String]): Unit ={
     val data = rawData.map { line =>
       val buffer = line.split(',').toBuffer
       buffer.remove(1, 3)
       buffer.remove(buffer.length - 1)
       Vectors.dense(buffer.map(_.toDouble).toArray)
-    }.cache()
+    }
 
-    val kmeans = new KMeans()
-    kmeans.setK(100)
-    kmeans.setRuns(10)
-    kmeans.setEpsilon(1.0e-6)
-    val model = kmeans.run(data)
 
-    val sample = data.map(datum =>
-      model.predict(datum) + "," + datum.toArray.mkString(",")
-    ).sample(false, 0.05)
+    import org.apache.spark.mllib.feature.StandardScaler
+    val scaler = new StandardScaler(withMean = true, withStd = true).fit(data)
+    val scaledData = data.map(lp => scaler.transform(lp))
+    print("standardScaler")
+    //scaledData.take(10).foreach(println)
 
-    sample.saveAsTextFile("file:///home/xyx/Desktop/sample")
+    (120 to 150 by 10).map(k =>
+      (k, clusteringScore2(scaledData, k))).toList.foreach(println)
 
-    data.unpersist()
-
-//visualize normalized data
-//    val data = rawData.map { line =>
-//      val buffer = line.split(',').toBuffer
-//      buffer.remove(1, 3)
-//      buffer.remove(buffer.length - 1)
-//      Vectors.dense(buffer.map(_.toDouble).toArray)
-//    }
-//
-//
-//    val normalizedData = data.map(buildNormalizationFunction(data)).cache()
-//
-//
-//    val kmeans = new KMeans()
-//    kmeans.setK(30)
-//    kmeans.setRuns(10)
-//    kmeans.setEpsilon(1.0e-6)
-//    val model = kmeans.run(normalizedData)
-//
-//    val sample = normalizedData.map(datum =>
-//      model.predict(datum) + "," + datum.toArray.mkString(",")
-//    ).sample(false, 0.05)
-//
-//    sample.saveAsTextFile("file:///home/xyx/Desktop/sample")
-//
-//    normalizedData.unpersist()
 
   }
-
   // Clustering, Take 2
 
   def buildNormalizationFunction(data: RDD[Vector]): (Vector => Vector) = {
@@ -194,8 +175,10 @@ object RunKMeans {
     }
 
     val normalizedData = data.map(buildNormalizationFunction(data)).cache()
-
-    (60 to 120 by 10).par.map(k =>
+    print("buildNormalizationFunction")
+    //normalizedData.take(10).foreach(println)
+//
+    (120 to 150 by 10).map(k =>
       (k, clusteringScore2(normalizedData, k))).toList.foreach(println)
 
     normalizedData.unpersist()
@@ -234,66 +217,21 @@ object RunKMeans {
   def clusteringTake3(rawData: RDD[String]): Unit = {
     val parseFunction = buildCategoricalAndLabelFunction(rawData)
     val data = rawData.map(parseFunction).values
-    val normalizedData = data.map(buildNormalizationFunction(data)).cache()
-
-    (80 to 160 by 10).map(k =>
-      (k, clusteringScore2(normalizedData, k))).toList.foreach(println)
-
-    normalizedData.unpersist()
+    data.take(10).foreach(println)
+//    val normalizedData = data.map(buildNormalizationFunction(data)).cache()
+//
+//    (80 to 160 by 10).map(k =>
+//      (k, clusteringScore2(normalizedData, k))).toList.foreach(println)
+//
+//    normalizedData.unpersist()
   }
 
-  // Clustering, Take 4
 
-  def entropy(counts: Iterable[Int]) = {
-    val values = counts.filter(_ > 0)
-    val n: Double = values.sum
-    values.map { v =>
-      val p = v / n
-      -p * math.log(p)
-    }.sum
-  }
 
-  def clusteringScore3(normalizedLabelsAndData: RDD[(String,Vector)], k: Int) = {
-    val kmeans = new KMeans()
-    kmeans.setK(k)
-    kmeans.setRuns(10)
-    kmeans.setEpsilon(1.0e-6)
-
-    val model = kmeans.run(normalizedLabelsAndData.values)
-
-    // Predict cluster for each datum
-    val labelsAndClusters = normalizedLabelsAndData.mapValues(model.predict)
-
-    // Swap keys / values
-    val clustersAndLabels = labelsAndClusters.map(_.swap)
-
-    // Extract collections of labels, per cluster
-    val labelsInCluster = clustersAndLabels.groupByKey().values
-
-    // Count labels in collections
-    val labelCounts = labelsInCluster.map(_.groupBy(l => l).map(_._2.size))
-
-    // Average entropy weighted by cluster size
-    val n = normalizedLabelsAndData.count()
-
-    labelCounts.map(m => m.sum * entropy(m)).sum / n
-  }
-
-  def clusteringTake4(rawData: RDD[String]): Unit = {
-    val parseFunction = buildCategoricalAndLabelFunction(rawData)
-    val labelsAndData = rawData.map(parseFunction)
-    val normalizedLabelsAndData =
-      labelsAndData.mapValues(buildNormalizationFunction(labelsAndData.values)).cache()
-
-    (80 to 160 by 10).map(k =>
-      (k, clusteringScore3(normalizedLabelsAndData, k))).toList.foreach(println)
-
-    normalizedLabelsAndData.unpersist()
-  }
 
   // Detect anomalies
 
-  def buildAnomalyDetector(
+  def buildAnomalyDetector( sc :SparkContext,
                             data: RDD[Vector],
                             normalizeFunction: (Vector => Vector)): (Vector => Boolean) = {
     val normalizedData = data.map(normalizeFunction)
@@ -301,29 +239,46 @@ object RunKMeans {
 
     val kmeans = new KMeans()
     kmeans.setK(150)
-    kmeans.setRuns(10)
+    //kmeans.setRuns(10)
     kmeans.setEpsilon(1.0e-6)
     val model = kmeans.run(normalizedData)
-
+    model.save(sc,"/home/xyx/Desktop/model/")
     normalizedData.unpersist()
 
     val distances = normalizedData.map(datum => distToCentroid(datum, model))
     val threshold = distances.top(100).last
-
+    print(threshold)
     (datum: Vector) => distToCentroid(normalizeFunction(datum), model) > threshold
   }
 
-  def anomalies(rawData: RDD[String]) = {
+  def anomalies(rawData: RDD[String],sc:SparkContext) = {
     val parseFunction = buildCategoricalAndLabelFunction(rawData)
     val originalAndData = rawData.map(line => (line, parseFunction(line)._2))
     val data = originalAndData.values
     val normalizeFunction = buildNormalizationFunction(data)
-    val anomalyDetector = buildAnomalyDetector(data, normalizeFunction)
+    val anomalyDetector = buildAnomalyDetector(sc,data, normalizeFunction)
     val anomalies = originalAndData.filter {
       case (original, datum) => anomalyDetector(datum)
     }.keys
     anomalies.take(10).foreach(println)
   }
+  def buildLatestModel(rawData: RDD[String],sc:SparkContext): Unit ={
+    val parseFunction = buildCategoricalAndLabelFunction(rawData)
+    val data = rawData.map(parseFunction).values
+    val normalizedData = data.map(buildNormalizationFunction(data)).cache()
+
+    val kmeans = new KMeans()
+    kmeans.setK(150)
+    kmeans.setRuns(10)
+    kmeans.setEpsilon(1.0e-6)
+    val model = kmeans.run(normalizedData)
+    val score = normalizedData.map(datum => distToCentroid(datum, model)).mean()
+    print(score)
+
+    normalizedData.unpersist()
+    model.save(sc,"/home/xyx/Desktop/model/")
+
+  }
+
 
 }
-
